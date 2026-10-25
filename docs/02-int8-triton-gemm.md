@@ -41,7 +41,9 @@ forward), so this is GB10/sm_121-specific — install the patch only where it he
 The patch replaces the extension module object `comfy_kitchen.backends.cuda._C` with a thin proxy:
 `cutlass_int8_dequant` goes to Triton (same signature, all three call sites), every other
 attribute falls through to the real extension. Calls with a **fused residual** and calls with
-**M < 128** go to the real CUTLASS kernel (not worth a Triton launch, and keeps exotic paths stock).
+**M < 128**, **K not a multiple of 16** or **non-contiguous tensors** go to the real CUTLASS kernel
+(which declines the last two, so comfy-kitchen takes its stock cuBLAS route — exactly as without the
+patch) (not worth a Triton launch, and keeps exotic paths stock).
 
 Safety rails (each was added after something went wrong or an audit asked for it):
 
@@ -71,6 +73,9 @@ order as CUTLASS (`int32 -> fp32 * x_scale * w_scale + bias -> cast`). Verified:
 
 - unit tests over odd shapes, bias/no bias, fp16/bf16 outputs: `torch.equal` with CUTLASS
 - a full H3 render: sampled latent sha256, all 192 decoded frames and the audio identical.
+- an independent audit re-checked M up to 75000 x 28672 (M·N > 2^31), K = 16..65536, fp16/fp32
+  output, tensor-wide scales and no-bias: identical for comfy-kitchen's call pattern. Outside it
+  (K % 16 ≠ 0 or strided tensors) stock CUTLASS declines the call, so the patch now declines too.
 
 ## Results
 

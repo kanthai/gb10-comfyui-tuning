@@ -23,6 +23,8 @@ MODE_FILE = "/etc/gb10-comfy-patch.mode"
 SPLIT_FILE = "/etc/gb10-vae-split.conf"
 TARGET = "comfy.ldm.minimax.vae"
 # sha256 of the dedented upstream MiniMaxH3VideoVAE.decode_temporal that _split_decode mirrors
+SPLIT_RETRY_AFTER = 600   # seconds to skip the split after a peer failure
+_split_state = {"skip_until": 0.0}
 VALIDATED_DECODE_TEMPORAL = ("9ca4d63079a186e5a74e25fb6ae072c4ed1845b4dde29ca3f1c11c355045e2af",)
 
 
@@ -98,7 +100,7 @@ def _unpack(body, torch):
     return header, tensors
 
 
-def _remote_decode(peer, payload, timeout=600):
+def _remote_decode(peer, payload, timeout):
     import http.client
     conn = http.client.HTTPConnection(peer[0], peer[1], timeout=timeout)
     try:
@@ -130,7 +132,7 @@ def _split_decode(self, z, output_buffer, peer, torch):
         t_start_idx = i * self.tokens_chunk_size
         t_end_idx = t_start_idx + self.tokens_chunk_size + self.token_overlap
         clips.append(z[:, :, t_start_idx:t_end_idx, :, :])
-    n_local = (num_chunks + 1) // 2
+    n_local = num_chunks // 2            # peer gets the larger half: the driver also probes, blends and writes
     remote_ids = list(range(n_local, num_chunks))
     header = {"probe": _probe_hash(self, torch, z.device), "tiling": bool(self.tiling),
               "tile_size": int(self.tile_size), "tile_overlap_min": int(self.tile_overlap_min)}
@@ -139,7 +141,7 @@ def _split_decode(self, z, output_buffer, peer, torch):
 
     def worker():
         try:
-            box["body"] = _remote_decode(peer, payload)
+            box["body"] = _remote_decode(peer, payload, timeout=60 + 15 * len(remote_ids))
         except Exception as exc:
             box["error"] = exc
 
@@ -150,13 +152,24 @@ def _split_decode(self, z, output_buffer, peer, torch):
         decoded[i] = self._adaptive_decode(clips[i])
     t_local = time.time() - t0
     thread.join()
-    if "error" in box:
-        raise box["error"]
-    rhead, rtensors = _unpack(box["body"], torch)
-    if len(rtensors) != len(remote_ids):
-        raise ValueError("peer returned the wrong number of chunks")
-    for i, t in zip(remote_ids, rtensors):
-        decoded[i] = t.to(z.device)
+    rhead = {}
+    try:
+        if "error" in box:
+            raise box["error"]
+        rhead, rtensors = _unpack(box["body"], torch)
+        if len(rtensors) != len(remote_ids):
+            raise ValueError("peer returned the wrong number of chunks")
+        for i, t in zip(remote_ids, rtensors):
+            if t.dtype != decoded[0].dtype or t.shape[:2] != decoded[0].shape[:2] or t.shape[3:] != decoded[0].shape[3:]:
+                raise ValueError(f"peer chunk {i} has shape {tuple(t.shape)} {t.dtype}")
+            decoded[i] = t.to(z.device)
+    except Exception as exc:
+        # keep the local half; decode the peer's chunks here (same result as a local decode)
+        _split_state["skip_until"] = time.time() + SPLIT_RETRY_AFTER
+        print(f"[gb10-comfy-patch] split peer failed ({exc!r:.300}); decoding its {len(remote_ids)} chunks locally, "
+              f"split paused {SPLIT_RETRY_AFTER} s", file=sys.stderr, flush=True)
+        for i in remote_ids:
+            decoded[i] = self._adaptive_decode(clips[i])
     t_wait = time.time() - t0
 
     dec = output_buffer
@@ -221,7 +234,8 @@ def _apply(mod):
         split_ok = src_hash in VALIDATED_DECODE_TEMPORAL
 
         def decode_into(self, z, buffer):
-            peer = _split_peer() if split_ok else None
+            import time
+            peer = _split_peer() if split_ok and time.time() >= _split_state["skip_until"] else None
             if peer is not None:
                 try:
                     return _split_decode(self, z, buffer, peer, torch)

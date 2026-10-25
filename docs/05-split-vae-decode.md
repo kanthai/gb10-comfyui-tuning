@@ -42,8 +42,12 @@ and do the blend/write on the driver exactly as upstream does.
    kernels) refuses the split. This replaced a first attempt that hashed parameter bytes:
    inside ComfyUI, DynamicVRAM stages weights, so reading parameters directly does not give the
    real weights, and the hash never matched (the split refused and fell back — safe, but useless).
-3. **Any error → local decode.** Peer down, timeout, HTTP error, wrong number of chunks: log one
-   line and decode everything locally.
+3. **Any error → finish locally without losing work.** Peer down, timeout (60 s + 15 s per chunk),
+   HTTP error, wrong number/shape of chunks: keep the chunks already decoded locally, decode the
+   peer's chunks locally too (same result as an unsplit decode), and skip the split for 10 minutes.
+   A first version re-ran the *whole* decode after a failure, so a broken peer made every decode
+   ~50% slower than no split at all — caught in review. With the fix a dead peer costs 55.6 s vs
+   52.9 s for a plain local decode.
 
 ## Results
 
@@ -61,8 +65,9 @@ same seed without the split.
 
 ## Notes
 
-- The chunk decode on the worker is slightly faster than on the driver (no ComfyUI process
-  competing), so ~half/half is close to balanced; the join point is within ~1.5 s.
+- The worker gets the larger half (6 of 11 chunks): the driver also runs the probe, the blend and
+  the writes. The peer keeps the VAE loaded for 30 minutes after a request (a cold load is ~12 s,
+  which would otherwise land on every render).
 - Transfer is small relative to compute: ~1.3 GB of fp16 pixels over 200 GbE.
 - Splitting across more than two nodes works the same way, but the sequential blend and the
   fixed per-request overhead make it pointless for an 11-chunk clip.

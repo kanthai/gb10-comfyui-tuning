@@ -133,7 +133,10 @@ class _CProxy:
         tx, tw, txs, tws, tb, tout = (torch.from_dlpack(t) for t in (x, w, x_scale, w_scale, bias, out))
         M, K = tx.shape if tx.dim() == 2 else (0, 0)
         N = tw.shape[0] if tw.dim() == 2 else 0
-        if (self._broken or M < MIN_M or tx.dtype != torch.int8 or tw.dtype != torch.int8
+        # Mirror CUTLASS eligibility (K % 16, contiguous) so anything CUTLASS would decline (and ck then
+        # routes to cuBLAS) keeps the stock route; the Triton kernel itself would handle those too.
+        if (self._broken or M < MIN_M or K % 16 or not (tx.is_contiguous() and tw.is_contiguous() and tout.is_contiguous())
+                or tx.dtype != torch.int8 or tw.dtype != torch.int8
                 or tw.dim() != 2 or tw.shape[1] != K or tuple(tout.shape) != (M, N)
                 or tout.dtype not in (torch.bfloat16, torch.float16, torch.float32)
                 or txs.dtype != torch.float32 or txs.numel() != M

@@ -39,11 +39,27 @@ Related public reports (same mechanism class, other directions):
 - NVIDIA developer forum: "DGX Spark ARM64 CUDA 13: pathological slowdown for many small H2D
   copies from pageable CPU memory (50x vs pinned)".
 
-`tools/d2h_matrix.py` is a micro-benchmark matrix to confirm this on your system: fresh vs
-`zero_()` vs read-touch vs `MADV_POPULATE_WRITE` vs `cudaHostRegister` vs pinned, both directions,
-with minor-fault counts and a `CUDA_BUFFER_PAGE_IN_THRESHOLD_MS` sweep. (If a read-touch stays
-slow, the zero-page theory holds: a CPU *read* of untouched anonymous memory maps the shared zero
-page read-only, so the GPU write still faults.)
+`tools/d2h_matrix.py` reproduces the matrix below on your system.
+
+### Measured (`tools/d2h_matrix.py`, 1.2 GB, GB10, 4 KiB pages, `init_on_alloc=0`, THP madvise)
+
+| Destination / source buffer | GPU→host | host→GPU |
+|---|---|---|
+| fresh `torch.empty` | **0.11 GB/s** (12.2 s) | **0.11 GB/s** — both directions are affected |
+| CPU read-touch first (`buf[::page].sum()`) | 0.65 GB/s | — |
+| CPU write-touch (`zero_()`) | 49.4 GB/s | 49.4 GB/s |
+| `madvise(MADV_POPULATE_WRITE)` | 49.4 GB/s | — |
+| `cudaHostRegister` on the fresh buffer | 49.5 GB/s | — |
+| pinned (`pin_memory=True`) | 49.1 GB/s | 49.2 GB/s |
+| fresh, `CUDA_BUFFER_PAGE_IN_THRESHOLD_MS` = 0 / 0.001 / 0.02 / 1 | 0.10-0.11 GB/s | — |
+
+- ~42 µs per 4 KiB page; the process records almost no minor faults (7), so the cost is in
+  GPU/driver-side fault servicing, not in CPU page faults of the copying thread.
+- A CPU *read* only helps 6x (it maps the shared zero page read-only; the writes still need real
+  pages) — consistent with the first-touch explanation.
+- The GH200 page-in environment variable has **no effect** here, so there is no one-setting fix:
+  every application has to write-touch (`zero_()`, `MADV_POPULATE_WRITE`), register or pin its
+  large host buffers.
 
 ### Rules that follow
 

@@ -17,11 +17,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 sys.path.insert(0, "/opt/ComfyUI")
 
-BIND = os.environ["H3_VAE_PEER_BIND"]   # this node's fabric/LAN address
+BIND = os.environ["H3_VAE_PEER_BIND"]                          # this node's fabric/LAN address
 PORT = int(os.environ.get("H3_VAE_PEER_PORT", "8290"))
-ALLOWED = set(os.environ["H3_VAE_PEER_ALLOW"]   # comma-separated driver address(es).split(","))
+ALLOWED = set(os.environ["H3_VAE_PEER_ALLOW"].split(","))      # driver address(es), comma-separated
 VAE_PATH = os.environ.get("H3_VAE_PATH", "/opt/ComfyUI/models/vae/minimax_h3_video_vae_fp16.safetensors")
-IDLE_UNLOAD = float(os.environ.get("H3_VAE_IDLE_UNLOAD", "300"))
+IDLE_UNLOAD = float(os.environ.get("H3_VAE_IDLE_UNLOAD", "1800"))
 MAX_BODY = 1 << 30
 
 _lock = threading.Lock()
