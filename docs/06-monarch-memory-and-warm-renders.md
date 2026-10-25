@@ -60,6 +60,11 @@ render and the same procedure was refused (35.9 GiB). Our job client therefore d
 2. on a capacity refusal: wait for an idle queue, `/free` + recycle, retry (max 3 tries);
 3. never silently fall back to a single node (~6x slower) unless explicitly asked.
 
+Keeping ComfyUI's node cache (`/free` with only `unload_models`) was also admitted once (53 GiB
+available) and a seed-only change then took 330 s, because the text and reference encodes were
+cached. In real use the prompt changes per shot, so the realistic gain is just the empty negative
+encode (~5.6 s), for ~8 GiB less headroom — not worth it while the margin is this thin.
+
 The structural fix belongs in Monarch: the driver could release its own TE/VAE/cache before the
 activation check, or account for it as reclaimable.
 

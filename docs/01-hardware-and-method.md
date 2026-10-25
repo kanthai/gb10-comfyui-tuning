@@ -6,7 +6,7 @@
   (~273 GB/s), integrated GPU (`torch.cuda.get_device_properties(0).is_integrated == True`),
   ConnectX-7 200 GbE RoCE between nodes. DGX OS 7.x (Ubuntu 24.04, aarch64).
 - Software: ComfyUI 0.41.3, comfy-kitchen 0.2.37, comfy-aimdo 0.5.6 (DynamicVRAM),
-  DGX Monarch 1.3.0, PyTorch 2.9/2.10 + CUDA 13, SageAttention 2 built for sm_121.
+  DGX Monarch 1.3.0, PyTorch 2.14 + CUDA 13, SageAttention 2 built for sm_121.
 - Nodes run as **pairs**: one ComfyUI "driver" (also Monarch rank 0) + one worker (rank 1).
   Monarch splits one render across both GPUs (Ulysses sequence parallel for H3, data-parallel
   "Fleet" for image batches).

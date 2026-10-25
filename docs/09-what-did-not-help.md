@@ -62,6 +62,42 @@ The cluster runs with `nvidia-smi -lgc 0,2000`. Is it leaving performance on the
 The GEMMs are bandwidth/power-bound: +45% power for +0-5%. Without air conditioning the uncapped
 node throttles and ends up slower overall. **Keep the cap.**
 
+## fp16 accumulation (`--fast fp16_accumulation`) for the H3 VAE
+
+With fp16 accumulation enabled, ComfyUI routes the H3 VAE's 3-D convolutions to comfy-kitchen's
+fp16-accumulate CUTLASS conv instead of cuDNN. On GB10 that is **48% slower** (56 frames: 20.9 s vs
+14.1 s) at 63 dB vs the default. Without the flag the convolutions already run through cuDNN (the
+"sm80 cutlass" kernel name in profiles is cuDNN's implicit-GEMM kernel), which is the faster path.
+
+## torch.compile for Qwen Image 2.1 (INT8)
+
+Monarch's `compile_dit` never compiles Qwen (it looks for `.blocks`). Stock `TorchCompileModel` on a
+single node: **17.8 s compiled vs 17.5 s eager** per 1024² image (25 steps) — no gain. It also first
+crashed: with DynamicVRAM, ComfyUI's malloc-graph recorder received a generic `torch.Stream`
+(`'torch.Stream' object has no attribute 'cuda_stream'` in `comfy_aimdo/malloc_graph.py`) when the
+model was wrapped by `TorchCompileModel`; `--disable-comfy-compiler` avoids that path.
+
+## Monarch RDMA latent return
+
+`rdma_latent_return` would return the sampled latent over one-sided RDMA. An H3 8 s latent is
+~22 MB; actor messaging already returns it in well under a second, and Monarch documents native
+RDMA as qualified only in a limited scope with failure recovery untested. Not worth it.
+
+## SageAttention 2 variants (H3 per-rank shape: 28 heads, 29k tokens, head dim 128)
+
+| Variant | ms | rel. error vs fp32 SDPA |
+|---|---|---|
+| PyTorch SDPA bf16 (flash) | 164.2 | 0.002 |
+| Sage auto on sm_121: INT8 QK, FP8 PV, per-warp, `fp32+fp16` | 90.1 | 0.040 |
+| same with `pv_accum_dtype="fp32+fp32"` | **86.5** (-4%, consistent at 36k tokens too) | 0.040 |
+| per-thread QK quantization | 91.7 | 0.040 |
+| FP16 PV, fp32 accumulate | 118.6 | **0.013** |
+| FP16 PV, fp16+fp32 / Triton | 138.5 / 143.9 | 0.013 |
+
+`fp32+fp32` is a free ~4% on attention (~5 s per 8 s clip) but not bit-identical to the current
+default; it needs a render A/B before adoption. The FP16-PV kernels are 3x more accurate but 31%
+slower — an option if attention error is ever suspected in a quality problem.
+
 ## NVFP4 for speed
 
 See doc 08: on GB10 with the Triton INT8 GEMM, NVFP4 is not faster for these models and it

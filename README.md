@@ -10,7 +10,7 @@ The goal was *faster without changing results*. Most wins below are bit-identica
 quantization swaps with measured fidelity.
 
 > These are field notes and drop-in patches for a specific stack (ComfyUI 0.41.x,
-> comfy-kitchen 0.2.37, DGX Monarch 1.3.0, PyTorch 2.9/2.10, CUDA 13, driver 580/590). Each patch
+> comfy-kitchen 0.2.37, DGX Monarch 1.3.0, PyTorch 2.14, CUDA 13, driver 580/590). Each patch
 > is version-guarded and falls back to stock behaviour when its assumptions don't hold. Read the
 > doc for a patch before installing it.
 
