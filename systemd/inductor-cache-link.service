@@ -1,0 +1,11 @@
+[Unit]
+Description=Persist DGX Monarch actors' torch.compile cache on disk (instead of tmpfs)
+Before=dgxm-worker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=%h/.local/bin/inductor-cache-link.sh
+
+[Install]
+WantedBy=default.target

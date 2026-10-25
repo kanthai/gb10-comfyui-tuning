@@ -1,0 +1,18 @@
+[Unit]
+Description=H3 video-VAE split-decode peer for the ComfyUI driver node (gb10_comfy_patch v3)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=comfy
+Group=comfy
+WorkingDirectory=/opt/ComfyUI
+ExecStart=/opt/comfyui-venv/bin/python -u /usr/local/lib/gb10/h3_vae_peer.py
+Environment=H3_VAE_PEER_BIND=10.0.0.2 H3_VAE_PEER_ALLOW=10.0.0.1
+Restart=on-failure
+RestartSec=10
+MemoryMax=20G
+OOMScoreAdjust=500
+
+[Install]
+WantedBy=multi-user.target
