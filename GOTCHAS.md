@@ -50,6 +50,11 @@ Things that cost us time, roughly in order of how much.
 - **Never silently fall back to one node** on a refused split: it is ~6x slower and you won't
   notice until the queue is hours late.
 
+- **Under a Monarch Ulysses split, attention runs through xfuser/yunchang**, which call
+  `sageattention.sageattn` directly — hooks on ComfyUI's attention module never fire there.
+- **`sageattention.sageattn` silently ignores unknown kwargs** (incl. ComfyUI's `smooth_k=False`).
+  Always confirm a kernel change by a *changed* output hash before trusting timings.
+
 ## Quantization
 
 - **Quantize from the original BF16**, not from an FP8 derivative: faster *and* +4.7 dB more

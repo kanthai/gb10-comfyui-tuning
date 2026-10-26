@@ -94,8 +94,24 @@ RDMA as qualified only in a limited scope with failure recovery untested. Not wo
 | FP16 PV, fp32 accumulate | 118.6 | **0.013** |
 | FP16 PV, fp16+fp32 / Triton | 138.5 / 143.9 | 0.013 |
 
-`fp32+fp32` is a free ~4% on attention (~5 s per 8 s clip) but not bit-identical to the current
-default; it needs a render A/B before adoption. The FP16-PV kernels are 3x more accurate but 31%
+**Adopted.** Real 2-node H3 render, same seed: sampling 290.5 → **282.1 s** (−2.9%), total
+405.8 → 398.0 s. Not bit-identical: same shots, composition and lighting, but motion takes a
+slightly different path (per-frame PSNR 15-24 dB in fast action, 22 dB on a face close-up,
+34-41 dB in a slow shot) — a "sibling" render of the same seed, judged visually indistinguishable
+in quality. Enabled with `/etc/gb10-sage-pv.conf` = `fp32+fp32` (opt-in hook in
+`patches/gb10_comfy_patch.py`).
+
+Two traps on the way to a valid A/B:
+
+- Under DGX Monarch's Ulysses split, attention does **not** go through ComfyUI's `attention.py`:
+  xfuser/yunchang's `SAGE_AUTO` calls `sageattention.sageattn` itself. Patch the package
+  attribute, not only ComfyUI's imported name. Verify with the latent hash — the first two
+  "A/B" renders were bit-identical to the baseline, i.e. the variant never ran.
+- `sageattention.sageattn` accepts and silently ignores unknown kwargs (yunchang passes
+  `dropout_p`, `softmax_scale`, `causal`, `window_size`; ComfyUI passes `smooth_k=False`, which
+  is therefore ignored too — production runs `smooth_k=True`). A wrapper must do the same or it
+  silently falls back. Monarch's built-in `SAGE_FP8` option also uses `fp32+fp32` but with
+  per-thread QK quantization and is only ~2.5% faster than auto; per-warp `fp32+fp32` is ~5.5%. The FP16-PV kernels are 3x more accurate but 31%
 slower — an option if attention error is ever suspected in a quality problem.
 
 ## NVFP4 for speed

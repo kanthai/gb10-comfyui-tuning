@@ -21,7 +21,10 @@ import sys
 
 MODE_FILE = "/etc/gb10-comfy-patch.mode"
 SPLIT_FILE = "/etc/gb10-vae-split.conf"
+SAGE_FILE = "/etc/gb10-sage-pv.conf"     # "fp32+fp32" = opt-in SageAttention PV accumulation on sm_121
 TARGET = "comfy.ldm.minimax.vae"
+ATTN_TARGET = "comfy.ldm.modules.attention"
+SAGE_PKG = "sageattention"   # Monarch's split path (xfuser/yunchang SAGE_AUTO) calls sageattention.sageattn
 # sha256 of the dedented upstream MiniMaxH3VideoVAE.decode_temporal that _split_decode mirrors
 SPLIT_RETRY_AFTER = 600   # seconds to skip the split after a peer failure
 _split_state = {"skip_until": 0.0}
@@ -264,9 +267,52 @@ def _apply(mod):
         print(f"[gb10-comfy-patch] NOT applied ({exc!r:.200})", file=sys.stderr, flush=True)
 
 
+def _apply_sage(mod):
+    """Opt-in: SageAttention 2 on sm_121 with fp32+fp32 PV accumulation instead of the auto fp32+fp16.
+
+    Same INT8-QK / FP8-PV per-warp kernel, ~4% faster at H3 shapes (86.5 vs 90.1 ms at 29k tokens)
+    with the same error vs fp32 SDPA (0.040). Not bit-identical to the default, hence opt-in.
+    """
+    try:
+        try:
+            with open(SAGE_FILE) as f:
+                want = f.read().strip()
+        except OSError:
+            return
+        if want != "fp32+fp32" or getattr(getattr(mod, "sageattn", None), "_gb10_sage", False):
+            return
+        import torch
+        if not torch.cuda.is_available() or torch.cuda.get_device_capability(0) != (12, 1):
+            return
+        from sageattention import core
+        orig = mod.sageattn
+
+        def sageattn(q, k, v, tensor_layout="HND", is_causal=False, sm_scale=None, return_lse=False,
+                     smooth_k=True, **kwargs):
+            # like sageattention.sageattn, extra kwargs (yunchang passes dropout_p, softmax_scale, causal,
+            # window_size, ...; ComfyUI passes smooth_k) are accepted and ignored
+            if q.dtype not in (torch.float16, torch.bfloat16):
+                return orig(q, k, v, tensor_layout=tensor_layout, is_causal=is_causal, sm_scale=sm_scale,
+                            return_lse=return_lse, smooth_k=smooth_k, **kwargs)
+            # mirror sageattn()'s sm_121 branch exactly except the accumulator: that branch swallows
+            # smooth_k in **kwargs (ComfyUI passes smooth_k=False), so the kernel default (True) applies
+            return core.sageattn_qk_int8_pv_fp8_cuda(
+                q, k, v, tensor_layout=tensor_layout, is_causal=is_causal, qk_quant_gran="per_warp",
+                sm_scale=sm_scale, return_lse=return_lse, pv_accum_dtype="fp32+fp32")
+
+        sageattn._gb10_sage = True
+        mod.sageattn = sageattn
+        print(f"[gb10-comfy-patch] SageAttention sm_121: pv_accum fp32+fp32 (opt-in) in {mod.__name__}", file=sys.stderr, flush=True)
+    except Exception as exc:
+        print(f"[gb10-comfy-patch] Sage hook NOT applied ({exc!r:.200})", file=sys.stderr, flush=True)
+
+
+_HOOKS = {TARGET: _apply, ATTN_TARGET: _apply_sage, SAGE_PKG: _apply_sage}
+
+
 class _Finder(importlib.abc.MetaPathFinder):
     def find_spec(self, name, path, target=None):
-        if name != TARGET:
+        if name not in _HOOKS:
             return None
         spec = importlib.machinery.PathFinder.find_spec(name, path)
         if spec is None or spec.loader is None:
@@ -275,7 +321,7 @@ class _Finder(importlib.abc.MetaPathFinder):
 
         def exec_module(module):
             orig_exec(module)
-            _apply(module)
+            _HOOKS[name](module)
 
         spec.loader.exec_module = exec_module
         return spec
@@ -283,9 +329,9 @@ class _Finder(importlib.abc.MetaPathFinder):
 
 try:
     if _enabled():
-        if TARGET in sys.modules:
-            _apply(sys.modules[TARGET])
-        else:
-            sys.meta_path.insert(0, _Finder())
+        for _name, _hook in _HOOKS.items():
+            if _name in sys.modules:
+                _hook(sys.modules[_name])
+        sys.meta_path.insert(0, _Finder())
 except Exception as exc:  # never break interpreter start-up
     print(f"[gb10-comfy-patch] disabled: {exc!r}", file=sys.stderr)
