@@ -66,6 +66,24 @@ monarch._src.actor.bootstrap_main`). `-s` skips *user* site-packages but the ven
 with no changes to either. Change the mode file on **both** nodes of a pair, restart ComfyUI and
 recycle the Monarch mesh so the actors re-import.
 
+### Second sweep (2026-10-26): drop the bounds masks
+
+48 more variants (tiles up to 256, BK 128, 4/8 warps, 3-5 stages) found nothing better than
+128x128x64 — except removing the per-iteration bounds masks from the K loop:
+
+| 60 s sustained, the four H3 shapes | ms / pass | |
+|---|---|---|
+| masked (original) | 135.5 | |
+| unmasked (M, N, K all tile multiples) | 127.6 | −5.8% |
+| K-only unmasked (any M/N, K % 64 == 0) | 130.3 | −3.8% |
+
+Clocks held at the cap (1982-1989 MHz). The kernel now picks the cheapest safe tier per call.
+Gotcha: the first version only had the fully-unmasked tier and showed **no** gain in a real render —
+H3's per-rank sequence (video + packed audio tokens) is not a multiple of 128, so it never ran.
+With the K-only tier: real 2-node render sampling 282.0 → 280.0 s, latent hash identical. All
+tiers verified `torch.equal` against `_C.cutlass_int8_dequant` on 21 cases (even/odd shapes,
+bias, fp16 out, scalar scale).
+
 ## Exactness
 
 Integer accumulation is exact, and the epilogue applies the same float operations in the same
