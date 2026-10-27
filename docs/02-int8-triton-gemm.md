@@ -84,6 +84,15 @@ With the K-only tier: real 2-node render sampling 282.0 → 280.0 s, latent hash
 tiers verified `torch.equal` against `_C.cutlass_int8_dequant` on 21 cases (even/odd shapes,
 bias, fp16 out, scalar scale).
 
+### Third sweep (2026-10-27): another GB10 user's settings
+
+A second GB10 owner reported 178-186 TOPS with 4 warps, 128x128x128 / 2 stages on the narrow
+shapes and GROUP_M 16 (8 for K = 14336) — at M = 8336 and an **uncapped 2.4 GHz** clock (his
+measured mma peak 236 TOPS, so ~77% of peak). Re-swept at our real H3 shapes (M = 29184/29221) and
+the 2000 MHz cap: BK {64,128} x warps {4,8} x stages {2,3,4} x GROUP_M {8,16}. Nothing beat the
+current 128x128x64 / 8 warps / 4 stages / G8 by more than 0.6% (noise) on any shape; ours sits at
+~89% of the capped peak. Best config depends on M and clock — measure on your own shapes.
+
 ## Exactness
 
 Integer accumulation is exact, and the epilogue applies the same float operations in the same
