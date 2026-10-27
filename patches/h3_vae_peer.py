@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -122,7 +123,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.client_address[0] not in ALLOWED:
             return self._reply(403, b"forbidden", "text/plain")
-        info = {"loaded": _state["model"] is not None, "fingerprint": _state["fingerprint"], "vae": VAE_PATH}
+        try:   # lets the driver skip the split while this GPU renders its own job (solo mode)
+            util = int(subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+                                      capture_output=True, text=True, timeout=3).stdout.split()[0])
+        except Exception:
+            util = -1
+        busy = util >= 50 and not _lock.locked()
+        info = {"loaded": _state["model"] is not None, "fingerprint": _state["fingerprint"], "vae": VAE_PATH,
+                "gpu_util": util, "busy": busy}
         self._reply(200, json.dumps(info).encode(), "application/json")
 
     def do_POST(self):

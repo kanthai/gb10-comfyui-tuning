@@ -103,6 +103,19 @@ def _unpack(body, torch):
     return header, tensors
 
 
+def _peer_busy(peer):
+    """True when the peer GPU is busy with its own work (e.g. its own solo render)."""
+    import http.client
+    import json
+    conn = http.client.HTTPConnection(peer[0], peer[1], timeout=5)
+    try:
+        conn.request("GET", "/")
+        resp = conn.getresponse()
+        return resp.status == 200 and bool(json.loads(resp.read()).get("busy"))
+    finally:
+        conn.close()
+
+
 def _remote_decode(peer, payload, timeout):
     import http.client
     conn = http.client.HTTPConnection(peer[0], peer[1], timeout=timeout)
@@ -127,6 +140,8 @@ def _split_decode(self, z, output_buffer, peer, torch):
     pad_tokens, num_chunks = self._decode_temporal_chunks(z.shape[2])
     if num_chunks < 2:
         raise ValueError("single chunk")
+    if _peer_busy(peer):
+        raise RuntimeError("peer GPU busy with its own job; decoding locally")
     if pad_tokens > 0:
         pad_z = z[:, :, -1:, :, :].repeat(1, 1, pad_tokens, 1, 1)
         z = torch.cat([z, pad_z], dim=2)

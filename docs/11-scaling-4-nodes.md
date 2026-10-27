@@ -36,6 +36,15 @@ clips per hour**; the split wins only latency for a single clip. One Spark held 
 (lowest MemAvailable 60-67 GiB, no swap growth). An independent 4-node owner measured the same
 ratio on Monarch's benchmark cells (1 -> 2 nodes 1.64x, 2 -> 4 nodes uly4 1.65x).
 
+### Running solo in production
+
+A single-node H3 graph needs SageAttention too, but `--use-sage-attention` is process-wide and would
+change every stock graph on that ComfyUI. `custom_nodes/gb10_attention` adds **GB10 Model Attention**:
+it attaches a registered attention backend (`sage`, `pytorch`, ...) to one model, the way core
+`ModelAttentionBackend` does. Solo with the node: 600 s cold / 555 s warm — identical to the global
+flag. With two Sparks each rendering its own clip, the split-VAE driver asks its peer first and
+decodes locally when the peer GPU is busy (`h3_vae_peer.py` reports `busy`).
+
 ## Monarch's own benchmark cell, our stack vs stock
 
 "MiniMax H3 guide" (Monarch example workflow, converted with `benchmark/sweep/convert.py`): fl2va
