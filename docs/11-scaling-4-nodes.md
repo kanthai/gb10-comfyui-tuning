@@ -19,8 +19,8 @@ Monarch overhead) and does not shrink with more ranks. To match two pairs a 4-wa
 ~210 s, i.e. ~75 s of sampling — impossible when 2-way sampling is ~300 s and a perfect 4-way split
 would still be ~150 s plus more all-to-all communication.
 
-**4-way only wins on latency for a single clip** (iterating on one shot). For throughput, run two
-pairs.
+**4-way only wins on latency for a single clip** (iterating on one shot). For throughput, two
+pairs beat one 4-way split — and, as measured below, one clip per Spark beats both.
 
 ## Measured: one clip per Spark vs a split pair (2026-10-27)
 
