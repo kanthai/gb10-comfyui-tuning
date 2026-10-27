@@ -22,6 +22,31 @@ would still be ~150 s plus more all-to-all communication.
 **4-way only wins on latency for a single clip** (iterating on one shot). For throughput, run two
 pairs.
 
+## Measured: one clip per Spark vs a split pair (2026-10-27)
+
+Same production H3 clip (ref2v, 8 s, 1344x768, 8 steps, 4 LoRAs, Sage), same stack:
+
+| | 1 Spark (stock ComfyUI) | 2-node split |
+|---|---|---|
+| cold | 610 s | ~400 s |
+| warm | 555 s | ~350 s |
+
+The split is only ~1.6x for 2x the hardware, so **two Sparks rendering separately give ~26% more
+clips per hour**; the split wins only latency for a single clip. One Spark held the clip comfortably
+(lowest MemAvailable 60-67 GiB, no swap growth). An independent 4-node owner measured the same
+ratio on Monarch's benchmark cells (1 -> 2 nodes 1.64x, 2 -> 4 nodes uly4 1.65x).
+
+## Monarch's own benchmark cell, our stack vs stock
+
+"MiniMax H3 guide" (Monarch example workflow, converted with `benchmark/sweep/convert.py`): fl2va
+INT8 ConvRot, 1344x768, 124 frames, 20 steps `res_multistep`, `TORCH_FLASH`, no LoRAs, 2 nodes, warm:
+
+| | Warm wall time |
+|---|---|
+| Monarch's published table (2100 MHz cap, stock stack) | 636.6 s |
+| independent 4-Spark owner (uncapped ~2.4 GHz, stock stack) | 640.6 s |
+| **this repo's stack (2000 MHz cap)** | **499.4 s** (sampling 464 s, split VAE 20.6 s) |
+
 ## Topology note
 
 Ulysses needs an all-to-all between every pair of ranks each layer. A ring of direct 200 GbE links
